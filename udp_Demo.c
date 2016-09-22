@@ -1,5 +1,7 @@
 /* My own UDP Demo */
 
+//说明：LOCAL 即 static
+
 #include "esp_common.h"
 #include "espconn.h"
 #include "Router.h"
@@ -37,36 +39,69 @@ user_udp_sent_cb(void *arg)
  * Returns      : none
 *******************************************************************************/
 LOCAL void
-user_udp_sent(struct espconn *pespconn)
+client_on_start_udp_send(struct espconn *pespconn)
 {
     int res;
 
-    printf("user_udp_sent function\n");
-    unsigned short length;
-    unsigned short packet_size = 1024;
-    char *pbuf = (char *)malloc(packet_size);
-    memset(pbuf, 0, packet_size);
+    printf("Client on start send!\n");
+    unsigned short length  = strlen(Start_Send_to_Server);
+    char *pbuf = (char *)malloc(length);
+    if(pbuf == NULL)
+    {
+        printf("user_udp_sent: malloc pbuf(size: %d) error!\n", length);
+        return;
+    }
 
-    length=strlen(Start_Send_to_Server);
+    length = strlen(Start_Send_to_Server);
     memcpy(pbuf, Start_Send_to_Server, length);
 
-    while((res = espconn_sent(pespconn, pbuf, strlen(pbuf))) != 0)
+    while((res = espconn_sent(pespconn, pbuf, strlen(pbuf))) != 0)          //send error
     {
         printf("ESP send error!\n");
         vTaskDelay(1000 / portTICK_RATE_MS); 
     }
 
     printf("ESP send successfully!\n");
-    // vTaskDelay(200 / portTICK_RATE_MS);
-    // res = espconn_sent(pespconn, pbuf, strlen(pbuf));
-    // if(res != 0)
-    //     printf("ESP send error!\n"); 
-    // else
-    //     printf("ESP send successfully!\n");
     
     free(pbuf);
 }   
 
+// LOCAL void
+// user_udp_sent(struct espconn *pespconn)
+// {
+//     int res;
+
+//     printf("Client start send!\n");
+//     unsigned short length;
+//     unsigned short packet_size = 1024;
+//     char *pbuf = (char *)malloc(packet_size);
+//     if(pbuf == NULL)
+//     {
+//         printf("user_udp_sent: malloc pbuf(size: %d) error!\n", packet_size);
+//         return;
+//     }
+//     memset(pbuf, 0, packet_size);
+
+//     length = strlen(Start_Send_to_Server);
+//     memcpy(pbuf, Start_Send_to_Server, length);
+
+//     while((res = espconn_sent(pespconn, pbuf, strlen(pbuf))) != 0)
+//     {
+//         printf("ESP send error!\n");
+//         vTaskDelay(1000 / portTICK_RATE_MS); 
+//     }
+
+//     printf("ESP send successfully!\n");
+    
+//     free(pbuf);
+// }   
+
+/******************************************************************************
+ * FunctionName : user_udp_recv
+ * Description  : recv callback function (need espconn_regist_recvcb to register)
+ * Parameters   : arg: esp连接；pdata：接收到的数据的头地址；len：数据长度
+ * Returns      : none
+*******************************************************************************/
 LOCAL void
 user_udp_recv(void *arg, char *pdata, unsigned short len)
 {
@@ -79,10 +114,15 @@ user_udp_recv(void *arg, char *pdata, unsigned short len)
         printf("%c", pdata[i]);
     printf("\n");
 
-    espconn_sent(pespconn, pdata, len);
+    espconn_sent(pespconn, pdata, len);                     //原样返回给服务器
 }
 
-
+/******************************************************************************
+ * FunctionName : user_udp_task
+ * Description  : a udp task
+ * Parameters   : pvParameters
+ * Returns      : none
+*******************************************************************************/
 void user_udp_task(void* pvParameters)
 {
     int wifi_status;
@@ -103,17 +143,26 @@ void user_udp_task(void* pvParameters)
 
     while((wifi_status = wifi_station_get_connect_status()) !=  STATION_GOT_IP)
     {
-        printf("wifi_status: %d\n", wifi_status);
+        switch(wifi_status)
+        {
+            case STATION_IDLE: printf("wifi_status: STATION_IDLE\n"); break;
+            case STATION_CONNECTING: printf("wifi_status: ESP8266 station is connecting to AP\n"); break;
+            case STATION_WRONG_PASSWORD: printf("wifi_status: the password is wrong\n"); break;
+            case STATION_NO_AP_FOUND: printf("wifi_status: ESP8266 station can not find the target AP\n"); break;
+            case STATION_CONNECT_FAIL: printf("wifi_status: ESP8266 station fail to connect to AP\n"); break;
+            default: printf("Unknow wifi status!!!\n");
+        }
         vTaskDelay(1000 / portTICK_RATE_MS);
     }
     printf("wifi_status: %d\n", wifi_status);
-    user_udp_sent(&ptrespconn);                                                 // sent data
+    client_on_start_udp_send(&ptrespconn);                                                 
 
-    while(1)
-    {
-        taskYIELD();
-        // vTaskDelay(200 / portTICK_RATE_MS);
-    }
+    vTaskDelete(NULL);
+    // while(1)
+    // {
+    //     taskYIELD();
+    //     // vTaskDelay(200 / portTICK_RATE_MS);
+    // }
 }
 
 /******************************************************************************
@@ -126,20 +175,17 @@ void user_init(void)
 {
     printf("SDK version:%s\n", system_get_sdk_version());
 
-    wifi_set_opmode(STATIONAP_MODE);                                //Set softAP + station mode
+    wifi_set_opmode(STATION_MODE);                                  //终端模式
 
-    struct station_config stationConf;                              //Set ap settings
-
+    struct station_config stationConf;                              //路由连接设置
     memset(&stationConf, 0, sizeof(stationConf));
     memcpy(&stationConf.ssid, SSID, sizeof(SSID));
     memcpy(&stationConf.password, PASSWORD, sizeof(PASSWORD));
     wifi_station_set_config(&stationConf);
 
-    os_delay_us(50000);                                             //Max 65535 µs
-    printf("start from here\r\n");
-
     espconn_init();
     xTaskCreate(user_udp_task, "UDP Task Test", 512, NULL, 1, NULL);
-    // user_udp_init();                                                // Create udp listening.
-
 }
+
+
+
